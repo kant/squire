@@ -46,9 +46,10 @@ collapse_for_report <- function(d){
       dplyr::summarise(y = sum(.data$y)) %>%
       dplyr::ungroup() %>%
       dplyr::rename(compartment = .data$group)
-}
+  }
 
 }
+
 #' Format model output as data.frame
 #'
 #' @param x squire_simulation object
@@ -70,30 +71,146 @@ collapse_for_report <- function(d){
 #'
 #' @return Formatted long data.frame
 #' @export
-format_output <- function(x, var_select = NULL, reduce_age = TRUE,
-                          combine_compartments = TRUE, date_0 = NULL){
+format_output <- function(
+  x,
+  var_select = NULL,
+  reduce_age = TRUE,
+  combine_compartments = TRUE,
+  date_0 = NULL
+  ){
+
+  # Multi/Single Compartment Variables
+  single_compartments <- c(
+    "S", "IMild", "R", "D", "n_E2_I",
+    "n_E2_ICase1", "n_E2_IMild", "delta_D"
+  )
+  multi_compartments <- c(
+    "E", "ICase", "IOxGetLive", "IOxGetDie", "IOxNotGetLive",
+    "IOxNotGetDie", "IMVGetLive", "IMVGetDie", "IMVNotGetLive",
+    "IMVNotGetDie", "IRec"
+  )
+
+  # Summary Values and Relevant Compartments
+  summary_variable_compartments <- list(
+    deaths = "delta_D",
+    infections = "n_E2_I",
+    hospital_occupancy = c(
+      "IOxGetLive1", "IOxGetLive2",
+      "IOxGetDie1", "IOxGetDie2",
+      "IRec1", "IRec2"
+    ),
+    ICU_occupancy = c("IMVGetLive1","IMVGetLive2","IMVGetDie1","IMVGetDie2"),
+    hospital_demand = c(
+      "IOxGetLive1", "IOxGetLive2",
+      "IOxGetDie1", "IOxGetDie2",
+      "IRec1", "IRec2",
+      "IOxNotGetLive1", "IOxNotGetLive2",
+      "IOxNotGetDie1", "IOxNotGetDie2"
+    ),
+    ICU_demand = c(
+      "IMVGetLive1","IMVGetLive2",
+      "IMVGetDie1","IMVGetDie2",
+      "IMVNotGetLive1","IMVNotGetLive2",
+      "IMVNotGetDie1","IMVNotGetDie2"
+    )
+  )
+  format_output_with_compartments(
+    x,
+    var_select,
+    reduce_age,
+    combine_compartments,
+    date_0,
+    single_compartments,
+    multi_compartments,
+    summary_variable_compartments
+  )
+}
+
+#' Format deterministic model output as data.frame
+#'
+#' @param x squire_simulation object
+#'
+#' @return Formatted long data.frame
+#' @export
+format_deterministic_output <- function(x){
+  # Multi/Single Compartment Variables
+  single_compartments <- c(
+    "S", "IMild", "R", "D"
+  )
+  multi_compartments <- c(
+    "E", "ICase", "IOxGetLive", "IOxGetDie", "IOxNotGetLive",
+    "IOxNotGetDie", "IMVGetLive", "IMVGetDie", "IMVNotGetLive",
+    "IMVNotGetDie", "IRec")
+
+  # Summary Values and Relevant Compartments
+  summary_variable_compartments <- list(
+    deaths = "D",
+    infections = c("ICase", "IMild"),
+    hospital_demand = c(
+      "IOxGetLive1", "IOxGetLive2",
+      "IOxGetDie1", "IOxGetDie2",
+      "IRec1", "IRec2",
+      "IOxNotGetLive1", "IOxNotGetLive2",
+      "IOxNotGetDie1", "IOxNotGetDie2"
+    ),
+    ICU_demand = c(
+      "IMVGetLive1","IMVGetLive2",
+      "IMVGetDie1","IMVGetDie2",
+      "IMVNotGetLive1","IMVNotGetLive2",
+      "IMVNotGetDie1","IMVNotGetDie2"
+    )
+  )
+  output_names <- names(x$output[1,])
+  x$output <- array(x$output, dim = c(dim(x$output), 1))
+  dimnames(x$output)[[2]]  <- output_names
+  x$parameters$replicates <- 1
+  format_output_with_compartments(
+    x,
+    names(summary_variable_compartments),
+    TRUE,
+    FALSE,
+    NULL,
+    single_compartments,
+    multi_compartments,
+    summary_variable_compartments
+  )
+}
+
+#' Format model for general compartment structures
+#'
+#' @details output with arbitrary compartment -> variable mappings as data.frame
+#'
+#' @param x squire_simulation object
+#' @param var_select variables to select from
+#' `summary_variable_compartments`
+#' @param reduce_age Collapse age-dimension, calculating the total in the
+#'   compartment.
+#' @param combine_compartments Collapse compartments of same type together
+#'   (e.g. E1 and E2 -> E)
+#' @param date_0 Date of time 0, if specified a date column will be added
+#' @param single_compartments a vector of single compartments
+#' @param multi_compartments a vector of linked compartments
+#' @param summary_variable_compartments a mapping of variables to compartments
+#'
+#' @return Formatted long data.frame
+format_output_with_compartments <- function(
+  x,
+  var_select = NULL,
+  reduce_age = TRUE,
+  combine_compartments = TRUE,
+  date_0 = NULL,
+  single_compartments,
+  multi_compartments,
+  summary_variable_compartments
+  ) {
+
+  summary_variables <- names(summary_variable_compartments)
 
   # Get relevant model details
   nt <- nrow(x$output)
   index <- odin_index(x$model)
   all_names <- names(x$output[1,,1])
   all_names_simp <- gsub("\\[.*?]", "", all_names)
-
-  # Multi/Single Compartment Variables
-  single_compartments <- c("S", "IMild", "R", "D", "n_E2_I", "n_E2_ICase1", "n_E2_IMild", "delta_D")
-  multi_compartments <- c("E", "ICase", "IOxGetLive", "IOxGetDie", "IOxNotGetLive", "IOxNotGetDie",
-                          "IMVGetLive", "IMVGetDie", "IMVNotGetLive", "IMVNotGetDie", "IRec")
-
-  # Summary Values and Relevant Compartments
-  summary_variables <- c("deaths", "infections", "hospital_occupancy", "ICU_occupancy", "hospital_demand", "ICU_demand")
-  summary_variable_compartments <- list(deaths = "delta_D",
-                                        infections = "n_E2_I",
-                                        hospital_occupancy = c("IOxGetLive1","IOxGetLive2","IOxGetDie1","IOxGetDie2", "IRec1", "IRec2"),
-                                        ICU_occupancy = c("IMVGetLive1","IMVGetLive2","IMVGetDie1","IMVGetDie2"),
-                                        hospital_demand = c("IOxGetLive1","IOxGetLive2","IOxGetDie1","IOxGetDie2", "IRec1", "IRec2",
-                                                            "IOxNotGetLive1","IOxNotGetLive2","IOxNotGetDie1","IOxNotGetDie2"),
-                                        ICU_demand = c("IMVGetLive1","IMVGetLive2","IMVGetDie1","IMVGetDie2",
-                                                       "IMVNotGetLive1","IMVNotGetLive2","IMVNotGetDie1","IMVNotGetDie2"))
 
   # Check var_select contains only variables described above
   if(sum(!(var_select %in% c(single_compartments, multi_compartments, summary_variables))) > 0) {
@@ -164,13 +281,17 @@ format_output <- function(x, var_select = NULL, reduce_age = TRUE,
   n_age_groups <- 17
 
   # generating df of extracted compartment/summary outputs, disaggregated by age or not
+  time_index <- index$t
+  if ('time' %in% names(index)) {
+    time_index <- index$time
+  }
   if (reduce_age == TRUE) {
-    out <- data.frame("t" = as.numeric(x$output[,index$time,]),
+    out <- data.frame("t" = as.numeric(x$output[,time_index,]),
                       "replicate" = as.numeric(mapply(rep, seq_len(x$parameters$replicates), nt)),
                       "compartment" = as.character(mapply(rep, vars, nt*x$parameters$replicates)),
                       "y" = unlist(output_list))
   } else {
-    out <- data.frame("t" = rep(as.numeric(x$output[,index$time, ]), n_age_groups), # ASK OJ TO CHECK THIS
+    out <- data.frame("t" = rep(as.numeric(x$output[,time_index,]), n_age_groups), # ASK OJ TO CHECK THIS
                       "age_group" = rep(1:n_age_groups, each = nt), ##### NEED TO CHANGE ####
                       "replicate" = as.numeric(mapply(rep, seq_len(x$parameters$replicates), n_age_groups * nt)),
                       "compartment" = as.character(mapply(rep, vars, n_age_groups*nt*x$parameters$replicates)),
@@ -202,7 +323,6 @@ format_output <- function(x, var_select = NULL, reduce_age = TRUE,
 
   return(out)
 }
-
 
 
 #' Format model output from simple as data.frame
